@@ -9,8 +9,16 @@
   (:import java.io.File))
 
 
-(defn appengine-prepare [project]
-  (let [prj-application (or (:appengine-application project) (:name project))
+(defn appengine-prepare [original-project]
+  (let [
+        ;;hack to filter out all appengine dependencies except appengine-api-1.0-sdk
+        ;;I was unable to figure out how to do this with only lein profiles
+        ;; really I want a compile time only dependency in the production profile
+        ;; and a full dependency for development
+        project (assoc original-project :dependencies  (filter (fn [d]
+                                                                 (not (= (first d) 'appengine-magic/appengine-magic)))
+                                                               (:dependencies original-project)))
+        prj-application (or (:appengine-application project) (:name project))
         prj-display-name (or (:appengine-display-name project) (:name project))
         prj-servlet (or (:appengine-entry-servlet project) "app_servlet")
         dependencies (classpath/resolve-dependencies :dependencies project) ; FIXME: Does this work?
@@ -20,7 +28,6 @@
         compile-path (File. (:compile-path project))
         compile-path-exists? (.isDirectory compile-path)
         compile-path-empty? (= 0 (-> compile-path .list seq count))]
-    (println dependencies)
     (println "preparing App Engine application" prj-display-name "for deployment")
     ;; check for basic correctness
     (when (some (fn [x] (= 'appengine-magic (first x)))
@@ -36,20 +43,19 @@
                                               prj-servlet))]))]
       (when (= 0 (leiningen.compile/compile project))
         ;; delete existing content of target lib/
-        (lancet/delete {:dir (.getPath target-lib-dir)})
-        ;; prepare destination lib/ directory
-        (lancet/mkdir {:dir target-lib-dir})
-        ;; make a jar of the compiled app, and put it in WEB-INF/lib
-        (leiningen.jar/jar (merge project
-                                  {:omit-source true
-                                   :jar-exclusions [#"^WEB-INF/appengine-generated.*$"]}))
-        (lancet/move {:file (leiningen.jar/get-jar-filename project)
-                      :todir (.getPath target-lib-dir)})
-        ;; copy important dependencies into WEB-INF/lib
-        ;; FIXME: This needs to exclude development-only dependencies.
-        (lancet/copy {:todir (.getPath target-lib-dir)}
-                     (lancet/fileset {:dir lib-dir
-                                      :includes "*"}))))
+;;      (lancet/delete {:dir (.getPath target-lib-dir)})
+      ;; prepare destination lib/ directory
+      (lancet/mkdir {:dir target-lib-dir})
+      ;; make a jar of the compiled app, and put it in WEB-INF/lib
+      (leiningen.jar/jar (merge project
+                                {:omit-source true
+                                 :jar-exclusions [#"^WEB-INF/appengine-generated.*$"]}))
+      (lancet/move {:file (leiningen.jar/get-jar-filename project)
+                    :todir (.getPath target-lib-dir)})
+      ;; copy important dependencies into WEB-INF/lib
+      ;; FIXME: This needs to exclude development-only dependencies.
+      (doseq [dep dependencies]
+        (lancet/copy {:file (str dep) :todir (.getPath target-lib-dir)}))))
     ;; Projects which do not normally use AOT may need some cleanup. This should
     ;; happen regardless of compilation success or failure.
     (when-not (contains? project :aot)
@@ -61,4 +67,4 @@
        compile-path-empty?
        (doseq [entry-name (.list compile-path)]
          (let [entry (File. compile-path entry-name)]
-           (leiningen.util.file/delete-file-recursively entry true)))))))
+           (leiningen.clean/delete-file-recursively entry true)))))))
