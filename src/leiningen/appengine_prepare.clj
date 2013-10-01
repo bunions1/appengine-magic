@@ -15,33 +15,33 @@
         ;;I was unable to figure out how to do this with only lein profiles
         ;; really I want a compile time only dependency in the production profile
         ;; and a full dependency for development
-        project (assoc original-project :dependencies  (filter (fn [d]
+        dep-filtered-project (assoc original-project :dependencies  (filter (fn [d]
                                                                  (not (= (first d) 'appengine-magic/appengine-magic)))
                                                                (:dependencies original-project)))
-        prj-application (or (:appengine-application project) (:name project))
-        prj-display-name (or (:appengine-display-name project) (:name project))
-        prj-servlet (or (:appengine-entry-servlet project) "app_servlet")
-        dependencies (classpath/resolve-dependencies :dependencies project) ; FIXME: Does this work?
-        war-dir (File. (or (:appengine-app-war-root project) "war"))
+        prj-application (or (:appengine-application original-project) (:name original-project))
+        prj-display-name (or (:appengine-display-name original-project) (:name original-project))
+        prj-servlet (or (:appengine-entry-servlet original-project) "app_servlet")
+        dependencies (classpath/resolve-dependencies :dependencies dep-filtered-project) ; FIXME: Does this work?
+        war-dir (File. (or (:appengine-app-war-root original-project) "war"))
         web-inf-dir (File. war-dir "WEB-INF")
         target-lib-dir (File. web-inf-dir "lib")
-        compile-path (File. (:compile-path project))
+        compile-path (File. (:compile-path original-project))
         compile-path-exists? (.isDirectory compile-path)
         compile-path-empty? (= 0 (-> compile-path .list seq count))]
     (println "preparing App Engine application" prj-display-name "for deployment")
     ;; check for basic correctness
     (when (some (fn [x] (= 'appengine-magic (first x)))
-                (:dependencies project))
+                (:dependencies original-project))
       (abort "project.clj error: put appengine-magic in :dev-dependencies, not :dependencies"))
     ;; compile all; when successful (status is 0), continue to prepare
-    (let [project (if (contains? project :aot)
-                      project
-                      (assoc project
-                        :keep-non-project-classes true
-                        :aot [(symbol (format "%s.%s"
-                                              (_dash prj-application)
-                                              prj-servlet))]))]
-      (when (= 0 (leiningen.compile/compile project))
+    (let [project (if (contains? original-project :aot)
+                    original-project
+                    (assoc original-project
+                      :keep-non-project-classes true
+                      :aot [(symbol (format "%s.%s"
+                                            (_dash prj-application)
+                                            prj-servlet))]))]
+      (leiningen.compile/compile project)
         ;; delete existing content of target lib/
 ;;      (lancet/delete {:dir (.getPath target-lib-dir)})
       ;; prepare destination lib/ directory
@@ -55,10 +55,10 @@
       ;; copy important dependencies into WEB-INF/lib
       ;; FIXME: This needs to exclude development-only dependencies.
       (doseq [dep dependencies]
-        (lancet/copy {:file (str dep) :todir (.getPath target-lib-dir)}))))
+        (lancet/copy {:file (str dep) :todir (.getPath target-lib-dir)})))
     ;; Projects which do not normally use AOT may need some cleanup. This should
     ;; happen regardless of compilation success or failure.
-    (when-not (contains? project :aot)
+    (when-not (contains? original-project :aot)
       (cond
        ;; never had a classes/ directory; unlikely with Leiningen
        (not compile-path-exists?)
